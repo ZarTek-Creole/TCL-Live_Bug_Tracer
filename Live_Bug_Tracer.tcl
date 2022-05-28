@@ -1,7 +1,7 @@
  ###############################################################################
 #
 # Live Bug Tracer
-# v2.0 (06/03/2012)   ©2012 MenzAgitat
+# v2.1 (06/03/2012)   ©2012 MenzAgitat
 #
 # IRC: irc.epiknet.org  #boulets / #eggdrop
 #
@@ -95,6 +95,9 @@
 #			possédait pour toute fonctionnalité d'afficher le backtrace des erreurs
 #			en temps réel.
 #		- Passage sous licence Creative Commons
+# 2.1    par ZarTek-Creole ( https://github.com/ZarTek-Creole )
+#		- Ajout de la posibilité de redirigers les message vers un salon
+#			voir le praramettre : variable default_channel_destionation
 #
 
 #
@@ -156,6 +159,11 @@ namespace eval LiveBugTracer {
 	# (1 = oui / 0 = non)
 	variable dont_consider_PublicTcl_errors_as_catched 1
 
+	## Salon de destination des messages (en plus qu'en partyline)
+	# mettre "#votre_salon" et pour desactiver laisser vide en metant ""
+    # A savoir: Vous pouvez également mettre votre pseudonyme pour avoir en privée
+	variable default_channel_destionation ""
+
 	## Si certains des scripts que vous utilisez utilisent des "trace", ceux-ci
 	# risquent de polluer le traçage des procédures (commande .trace).
 	# Vous pouvez définir ici une liste de procédures de callback connues qui
@@ -173,7 +181,7 @@ namespace eval LiveBugTracer {
 
 	## Autorisations requises pour utiliser les commandes de ce script
 	variable debugging_auth "n|n"
-
+	
 	## Commande pour activer/désactiver le backtrace automatique des erreurs
 	# (surveillance en temps réel de la variable $::errorInfo)
 	variable autobacktrace_cmd "autobacktrace"
@@ -195,6 +203,9 @@ namespace eval LiveBugTracer {
 
 	## Commande pour activer/désactiver la protection anti-boucle infinie.
 	variable anti_infiniteloop_cmd "loopfuse"
+
+    ## Commande pour activer/désactiver l'envoi vers un salon.
+	variable destination_cmd "destination"
 
 
 	###
@@ -309,10 +320,17 @@ namespace eval LiveBugTracer {
 	### Initialisation
 	 #############################################################################
 	variable scriptname "Live Bug Tracer"
-	variable version "2.0.20120306"
+	variable version "2.1.20220528"
 	variable autobacktrace_status $default_autobacktrace_status
 	variable autobacktrace_catched_errors $default_autobacktrace_catch_status
 	variable anti_infiniteloop_status $default_anti_infiniteloop_status
+	if { ${default_channel_destionation} == "" } { 
+        variable destination_status 0
+        variable channel_destionation ""
+    } else { 
+        variable destination_status 1 
+        variable channel_destionation ${default_channel_destionation}
+    }
 	variable running_traces {}
 	variable latent_traces {}
 	set ::LiveBugTracer::trace_is_running 0
@@ -322,7 +340,7 @@ namespace eval LiveBugTracer {
 		::LiveBugTracer::enter_proc_watch_call ::LiveBugTracer::leave_proc_watch_call ::LiveBugTracer::delete_proc_watch_call ::LiveBugTracer::rename_proc_watch_call\
 		::LiveBugTracer::enter_cmd_watch_call ::LiveBugTracer::leave_cmd_watch_call ::LiveBugTracer::delete_cmd_watch_call ::LiveBugTracer::rename_cmd_watch_call\
 		::LiveBugTracer::enter_trace_call ::LiveBugTracer::leave_trace_call ::LiveBugTracer::delete_trace_call ::LiveBugTracer::rename_trace_call ::LiveBugTracer::enterstep_trace_call\
-		::LiveBugTracer::stop_varinproc_watch_call ::LiveBugTracer::transfer_varinproc_watch_call\
+		::LiveBugTracer::stop_varinproc_watch_call ::LiveBugTracer::transfer_varinproc_watch_call ::LiveBugTracer::sent_message\
 	}
 	set known_tracers [concat $removable_tracers $known_tracers]
 	if { ![::tcl::info::exists ::errorInfo] } { set ::errorInfo {} }
@@ -383,6 +401,46 @@ proc ::LiveBugTracer::activate_deactivate {nick host hand chan idx arg} {
 			set log 1
 		}
 		if { ($status_has_changed) && ([::tcl::info::exists ::LiveBugTracer::last_error]) } { unset ::LiveBugTracer::last_error }
+	}
+	::LiveBugTracer::output_message $chan $idx $log $message
+}
+ ###############################################################################
+### Activation / désactivation de l'envois des message vers un salon
+ ###############################################################################
+proc ::LiveBugTracer::pub_destination {nick host hand chan arg} {
+	::LiveBugTracer::activate_deactivate_destination $nick $host $hand $chan - $arg
+}
+proc ::LiveBugTracer::dcc_destination {hand idx arg} {
+	::LiveBugTracer::activate_deactivate_destination [set nick [hand2nick $hand]] [getchanhost $nick] $hand - $idx $arg
+}
+proc ::LiveBugTracer::activate_deactivate_destination {nick host hand chan idx arg} {
+	set log 0
+    if { $arg eq "off" } {
+		if { !$::LiveBugTracer::destination_status } {
+			set message "La sortie vers le salon est déjà désactivé."
+		} else {
+			set ::LiveBugTracer::destination_status 0
+			set ::LiveBugTracer::channel_destination ""
+			set message "La sortie vers un salon est maintenant désactivé."
+			set log 1
+		}
+	} elseif { $arg eq "status" } {
+		if { !$::LiveBugTracer::destination_status } {
+            set message "La sortie vers un salon est désactivé."
+		} else {
+			set message "La sortie vers un salon est activée vers ${::LiveBugTracer::channel_destination}."
+		}
+	} elseif { [set arg [::tcl::string::tolower $arg]] != "" } {
+		if { $::LiveBugTracer::destination_status } {
+			set message "La sortie vers un salon est activée vers ${::LiveBugTracer::channel_destination}."
+		} else {
+			set ::LiveBugTracer::destination_status 1
+            set ::LiveBugTracer::channel_destination $arg
+			set message "La sortie est activée vers ${::LiveBugTracer::channel_destination}."
+			set log 1
+		}
+	} else {
+		set message "\037Syntaxe\037 : [::LiveBugTracer::auto_command_prefix $chan][set ::LiveBugTracer::destination_cmd] \00314<\003#nom_de_salon\00314/\003off\00314/\003status\00314>\003 \00307|\003 permet de gérer l'envois des sorties vers un salon spécifique."
 	}
 	::LiveBugTracer::output_message $chan $idx $log $message
 }
@@ -491,7 +549,7 @@ proc ::LiveBugTracer::handle_infinite_loop {type} {
 	} else {
 		set output "la commande :[set ::LiveBugTracer::highlight_color] [::LiveBugTracer::truncate_line $::LiveBugTracer::max_data_length [regsub -all {\n} $frame(cmd) " "]]"
 	}
-	putloglev o * [::LiveBugTracer::filter_styles - "[set ::LiveBugTracer::default_prefix]Boucle infinie probable détectée (temps d'exécution >[set ::LiveBugTracer::assume_infinite_loop_after]s) dans [set output]"]
+	::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - "[set ::LiveBugTracer::default_prefix]Boucle infinie probable détectée (temps d'exécution >[set ::LiveBugTracer::assume_infinite_loop_after]s) dans [set output]"]
 	return $output
 }
 
@@ -553,9 +611,9 @@ proc ::LiveBugTracer::backtrace_error {type {args {}}} {
 			set backtrace_prefix $::LiveBugTracer::catched_error_backtrace_prefix
 		}
 		set output [split $::errorInfo "\n"]
-		putloglev o * [::LiveBugTracer::filter_styles - "[set main_prefix][set ::LiveBugTracer::backtrace_color] [lindex $output 0]\003"]
+		::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - "[set main_prefix][set ::LiveBugTracer::backtrace_color] [lindex $output 0]\003"]
 		foreach line [lrange $output 1 end] {
-			putloglev o * [::LiveBugTracer::filter_styles - "[set backtrace_prefix][set ::LiveBugTracer::backtrace_color] $line\003"]
+			::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - "[set backtrace_prefix][set ::LiveBugTracer::backtrace_color] $line\003"]
 		}
 	}
 }
@@ -795,7 +853,7 @@ proc ::LiveBugTracer::stop_varinproc_watch_call {oldname newname operation} {
 	set ::LiveBugTracer::latent_traces [lreplace $::LiveBugTracer::latent_traces [set index [lsearch -exact -index 0 $::LiveBugTracer::latent_traces [list type var target $varname tracetype unset call ::LiveBugTracer::varinproc_unset_watch_call]]] $index]
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type cmd target $oldname tracetype delete call ::LiveBugTracer::stop_varinproc_watch_call]]] $index]
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type cmd target $oldname tracetype rename call ::LiveBugTracer::transfer_varinproc_watch_call]]] $index]
-	putloglev o * [::LiveBugTracer::filter_styles - "[set ::LiveBugTracer::default_prefix]La surveillance des variables temporaires de la procédure[set ::LiveBugTracer::highlight_color] [set oldname]\003 a été désactivée suite à sa modification ou à sa suppression."]
+	::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - "[set ::LiveBugTracer::default_prefix]La surveillance des variables temporaires de la procédure[set ::LiveBugTracer::highlight_color] [set oldname]\003 a été désactivée suite à sa modification ou à sa suppression."]
 }	
 
  ###############################################################################
@@ -809,7 +867,7 @@ proc ::LiveBugTracer::transfer_varinproc_watch_call {oldname newname operation} 
 	set ::LiveBugTracer::latent_traces [lreplace $::LiveBugTracer::latent_traces [set index [lsearch -exact -index 0 $::LiveBugTracer::latent_traces [list type var target $varname tracetype unset call ::LiveBugTracer::varinproc_unset_watch_call]]] $index [list [list type var target $varname tracetype unset call ::LiveBugTracer::varinproc_unset_watch_call] $newname]]
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type cmd target $oldname tracetype delete call ::LiveBugTracer::stop_varinproc_watch_call]]] $index [list type cmd target $newname tracetype delete call ::LiveBugTracer::stop_varinproc_watch_call]]
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type cmd target $oldname tracetype rename call ::LiveBugTracer::transfer_varinproc_watch_call]]] $index [list type cmd target $newname tracetype rename call ::LiveBugTracer::transfer_varinproc_watch_call]]
-	putloglev o * [::LiveBugTracer::filter_styles - "[set ::LiveBugTracer::default_prefix]La procédure[set ::LiveBugTracer::highlight_color] [set oldname]\003 a été renommée en[set ::LiveBugTracer::highlight_color] [set newname]\003. Ses variables temporaires restent surveillées."]
+	::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - "[set ::LiveBugTracer::default_prefix]La procédure[set ::LiveBugTracer::highlight_color] [set oldname]\003 a été renommée en[set ::LiveBugTracer::highlight_color] [set newname]\003. Ses variables temporaires restent surveillées."]
 }
 
 
@@ -841,7 +899,7 @@ proc ::LiveBugTracer::var_read_watch_call {varname element operation} {
 		set output "[set ::LiveBugTracer::callback_prefix][set ::LiveBugTracer::watch_var_read_color]\[read \$[set varname]([set element])\]\003 contexte :[set ::LiveBugTracer::highlight_color] [::LiveBugTracer::truncate_line $::LiveBugTracer::max_data_length $invoked_from]\n[set ::LiveBugTracer::watch_var_in_prefix][set ::LiveBugTracer::highlight_color] [::LiveBugTracer::truncate_line $::LiveBugTracer::max_data_length [set [set varname]($element)]]"
 	}
 	foreach line [::LiveBugTracer::split_line $::LiveBugTracer::max_line_length $output] {
-		putloglev o * [::LiveBugTracer::filter_styles - $line]
+		::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - $line]
 	}
 }
 
@@ -872,7 +930,7 @@ proc ::LiveBugTracer::varinproc_read_watch_call {varname element operation} {
 		set output "[set ::LiveBugTracer::callback_prefix][set ::LiveBugTracer::watch_var_read_color]\[read \$[set varname]([set element])\]\003 contexte :[set ::LiveBugTracer::highlight_color] [::LiveBugTracer::truncate_line $::LiveBugTracer::max_data_length $invoked_from]\n[set ::LiveBugTracer::watch_var_in_prefix][set ::LiveBugTracer::highlight_color] [::LiveBugTracer::truncate_line $::LiveBugTracer::max_data_length [eval $get_array_element_value_code]]"
 	}
 	foreach line [::LiveBugTracer::split_line $::LiveBugTracer::max_line_length $output] {
-		putloglev o * [::LiveBugTracer::filter_styles - $line]
+		::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - $line]
 	}
 }
 
@@ -909,7 +967,7 @@ proc ::LiveBugTracer::var_write_watch_call {varname element operation} {
 		set output "[set ::LiveBugTracer::callback_prefix][set ::LiveBugTracer::watch_var_write_color]\[write \$[set varname]\]\003 contexte :[set ::LiveBugTracer::highlight_color] [::LiveBugTracer::truncate_line $::LiveBugTracer::max_data_length $invoked_from]\n[set ::LiveBugTracer::watch_var_in_prefix][set ::LiveBugTracer::highlight_color] [::LiveBugTracer::truncate_line $::LiveBugTracer::max_data_length $previous_value]\n[set ::LiveBugTracer::watch_var_out_prefix][set ::LiveBugTracer::highlight_color] [::LiveBugTracer::truncate_line $::LiveBugTracer::max_data_length $actual_value]"
 	}
 	foreach line [::LiveBugTracer::split_line $::LiveBugTracer::max_line_length $output] {
-		putloglev o * [::LiveBugTracer::filter_styles - $line]
+		::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - $line]
 	}
 	set ::LiveBugTracer::shadow($varname) $actual_value
 }
@@ -947,7 +1005,7 @@ proc ::LiveBugTracer::varinproc_write_watch_call {varname element operation} {
 		set output "[set ::LiveBugTracer::callback_prefix][set ::LiveBugTracer::watch_var_write_color]\[write \$[set varname]\]\003 contexte :[set ::LiveBugTracer::highlight_color] [::LiveBugTracer::truncate_line $::LiveBugTracer::max_data_length $invoked_from]\n[set ::LiveBugTracer::watch_var_in_prefix][set ::LiveBugTracer::highlight_color] [::LiveBugTracer::truncate_line $::LiveBugTracer::max_data_length $previous_value]\n[set ::LiveBugTracer::watch_var_out_prefix][set ::LiveBugTracer::highlight_color] [::LiveBugTracer::truncate_line $::LiveBugTracer::max_data_length $actual_value]"
 	}
 	foreach line [::LiveBugTracer::split_line $::LiveBugTracer::max_line_length $output] {
-		putloglev o * [::LiveBugTracer::filter_styles - $line]
+		::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - $line]
 	}
 	set ::LiveBugTracer::shadow($varname) $actual_value
 }
@@ -993,11 +1051,11 @@ proc ::LiveBugTracer::var_unset_watch_call {varname element operation} {
 	}
 	if { $output ne "" } {
 		foreach line [::LiveBugTracer::split_line $::LiveBugTracer::max_line_length $output] {
-			putloglev o * [::LiveBugTracer::filter_styles - $line]
+			::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - $line]
 		}
 	}
 	if { $trace_off } {
-		putloglev o * [::LiveBugTracer::filter_styles - "[set ::LiveBugTracer::default_prefix]Surveillance désactivée sur la variable [set ::LiveBugTracer::highlight_color]\$[set varname]\003."]
+		::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - "[set ::LiveBugTracer::default_prefix]Surveillance désactivée sur la variable [set ::LiveBugTracer::highlight_color]\$[set varname]\003."]
 	}
 }
 
@@ -1038,7 +1096,7 @@ proc ::LiveBugTracer::varinproc_unset_watch_call {varname element operation} {
 		}
 	}
 	foreach line [::LiveBugTracer::split_line $::LiveBugTracer::max_line_length $output] {
-		putloglev o * [::LiveBugTracer::filter_styles - $line]
+		::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - $line]
 	}
 }
 
@@ -1049,7 +1107,7 @@ proc ::LiveBugTracer::varinproc_unset_watch_call {varname element operation} {
 proc ::LiveBugTracer::enter_cmd_watch_call {command operation} {
 	set output "[set ::LiveBugTracer::callback_prefix][set ::LiveBugTracer::watch_cmd_call_color]\[enter [lindex $command 0]\][set ::LiveBugTracer::highlight_color] [::LiveBugTracer::truncate_line $::LiveBugTracer::max_data_length [regsub -all {\n} $command " "]]"
 	foreach line [::LiveBugTracer::split_line $::LiveBugTracer::max_line_length $output] {
-		putloglev o * [::LiveBugTracer::filter_styles - $line]
+		::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - $line]
 	}
 }
 
@@ -1065,7 +1123,7 @@ proc ::LiveBugTracer::leave_cmd_watch_call {command errorcode result operation} 
 	}
 	set output "[set ::LiveBugTracer::callback_prefix][set ::LiveBugTracer::watch_cmd_return_color]\[leave [lindex $command 0]\]\003 \037code d'erreur\037 : [set errorcode]  [set ::LiveBugTracer::trace_separator_color]|\003  \037retour\037 : [::LiveBugTracer::truncate_line $::LiveBugTracer::max_data_length $result]"
 	foreach line [::LiveBugTracer::split_line $::LiveBugTracer::max_line_length $output] {
-		putloglev o * [::LiveBugTracer::filter_styles - $line]
+		::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - $line]
 	}
 }
 
@@ -1077,7 +1135,7 @@ proc ::LiveBugTracer::delete_cmd_watch_call {oldname newname operation} {
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type cmd target $oldname tracetype leave call ::LiveBugTracer::leave_cmd_watch_call]]] $index]
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type cmd target $oldname tracetype delete call ::LiveBugTracer::delete_cmd_watch_call]]] $index]
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type cmd target $oldname tracetype rename call ::LiveBugTracer::rename_cmd_watch_call]]] $index]
-	putloglev o * [::LiveBugTracer::filter_styles - "[set ::LiveBugTracer::default_prefix]Surveillance désactivée sur la commande[set ::LiveBugTracer::highlight_color] [set oldname]\003 suite à sa suppression."]
+	::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - "[set ::LiveBugTracer::default_prefix]Surveillance désactivée sur la commande[set ::LiveBugTracer::highlight_color] [set oldname]\003 suite à sa suppression."]
 }
 
  ###############################################################################
@@ -1088,7 +1146,7 @@ proc ::LiveBugTracer::rename_cmd_watch_call {oldname newname operation} {
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type cmd target $oldname tracetype leave call ::LiveBugTracer::leave_cmd_watch_call]]] $index [list type cmd target $newname tracetype leave call ::LiveBugTracer::leave_cmd_watch_call]]
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type cmd target $oldname tracetype delete call ::LiveBugTracer::delete_cmd_watch_call]]] $index [list type cmd target $newname tracetype delete call ::LiveBugTracer::delete_cmd_watch_call]]
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type cmd target $oldname tracetype rename call ::LiveBugTracer::rename_cmd_watch_call]]] $index [list type cmd target $newname tracetype rename call ::LiveBugTracer::rename_cmd_watch_call]]
-	putloglev o * [::LiveBugTracer::filter_styles - "[set ::LiveBugTracer::default_prefix]La commande[set ::LiveBugTracer::highlight_color] [set oldname]\003 a été renommée en[set ::LiveBugTracer::highlight_color] [set newname]\003 et reste surveillée. Notez que[set ::LiveBugTracer::highlight_color] [set oldname]\003 n'est maintenant plus surveillée."]
+	::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - "[set ::LiveBugTracer::default_prefix]La commande[set ::LiveBugTracer::highlight_color] [set oldname]\003 a été renommée en[set ::LiveBugTracer::highlight_color] [set newname]\003 et reste surveillée. Notez que[set ::LiveBugTracer::highlight_color] [set oldname]\003 n'est maintenant plus surveillée."]
 }
 
  ###############################################################################
@@ -1097,7 +1155,7 @@ proc ::LiveBugTracer::rename_cmd_watch_call {oldname newname operation} {
 proc ::LiveBugTracer::enter_proc_watch_call {command operation} {
 	set output "[set ::LiveBugTracer::callback_prefix][set ::LiveBugTracer::watch_proc_call_color]\[enter [lindex $command 0]\][set ::LiveBugTracer::highlight_color] [::LiveBugTracer::truncate_line $::LiveBugTracer::max_data_length [regsub -all {\n} $command " "]]"
 	foreach line [::LiveBugTracer::split_line $::LiveBugTracer::max_line_length $output] {
-		putloglev o * [::LiveBugTracer::filter_styles - $line]
+		::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - $line]
 	}
 }
 
@@ -1112,7 +1170,7 @@ proc ::LiveBugTracer::leave_proc_watch_call {command errorcode result operation}
 	}
 	set output "[set ::LiveBugTracer::callback_prefix][set ::LiveBugTracer::watch_proc_return_color]\[leave [lindex $command 0]\]\003 \037code d'erreur\037 : [set errorcode]  [set ::LiveBugTracer::trace_separator_color]|\003  \037retour\037 : [::LiveBugTracer::truncate_line $::LiveBugTracer::max_data_length $result]"
 	foreach line [::LiveBugTracer::split_line $::LiveBugTracer::max_line_length $output] {
-		putloglev o * [::LiveBugTracer::filter_styles - $line]
+		::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - $line]
 	}
 }
 
@@ -1125,7 +1183,7 @@ proc ::LiveBugTracer::delete_proc_watch_call {oldname newname operation} {
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type exe target $oldname tracetype leave call ::LiveBugTracer::leave_proc_watch_call]]] $index]
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type cmd target $oldname tracetype delete call ::LiveBugTracer::delete_proc_watch_call]]] $index]
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type cmd target $oldname tracetype rename call ::LiveBugTracer::rename_proc_watch_call]]] $index]
-	putloglev o * [::LiveBugTracer::filter_styles - "[set ::LiveBugTracer::default_prefix]Surveillance désactivée sur la procédure[set ::LiveBugTracer::highlight_color] [set oldname]\003 suite à sa modification ou à sa suppression."]
+	::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - "[set ::LiveBugTracer::default_prefix]Surveillance désactivée sur la procédure[set ::LiveBugTracer::highlight_color] [set oldname]\003 suite à sa modification ou à sa suppression."]
 }
 
  ###############################################################################
@@ -1136,7 +1194,7 @@ proc ::LiveBugTracer::rename_proc_watch_call {oldname newname operation} {
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type exe target $oldname tracetype leave call ::LiveBugTracer::leave_proc_watch_call]]] $index [list type exe target $newname tracetype leave call ::LiveBugTracer::leave_proc_watch_call]]
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type cmd target $oldname tracetype delete call ::LiveBugTracer::delete_proc_watch_call]]] $index [list type cmd target $newname tracetype delete call ::LiveBugTracer::delete_proc_watch_call]]
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type cmd target $oldname tracetype rename call ::LiveBugTracer::rename_proc_watch_call]]] $index [list type cmd target $newname tracetype rename call ::LiveBugTracer::rename_proc_watch_call]]
-	putloglev o * [::LiveBugTracer::filter_styles - "[set ::LiveBugTracer::default_prefix]La procédure[set ::LiveBugTracer::highlight_color] [set oldname]\003 a été renommée en[set ::LiveBugTracer::highlight_color] [set newname]\003 et reste surveillée. Notez que[set ::LiveBugTracer::highlight_color] [set oldname]\003 n'est maintenant plus surveillée."]
+	::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - "[set ::LiveBugTracer::default_prefix]La procédure[set ::LiveBugTracer::highlight_color] [set oldname]\003 a été renommée en[set ::LiveBugTracer::highlight_color] [set newname]\003 et reste surveillée. Notez que[set ::LiveBugTracer::highlight_color] [set oldname]\003 n'est maintenant plus surveillée."]
 }
 
  ###############################################################################
@@ -1222,7 +1280,7 @@ proc ::LiveBugTracer::enter_trace_call {command operation} {
 	set ::LiveBugTracer::running_trace_history([md5 [set procname [lindex $command 0]]]) {}
 	set output "[set ::LiveBugTracer::callback_prefix][set ::LiveBugTracer::trace_proc_call_color]\[enter [set procname]\][set ::LiveBugTracer::highlight_color] [::LiveBugTracer::truncate_line $::LiveBugTracer::max_data_length [regsub -all {\n} $command " "]]"
 	foreach line [::LiveBugTracer::split_line $::LiveBugTracer::max_line_length $output] {
-		putloglev o * [::LiveBugTracer::filter_styles - $line]
+		::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - $line]
 	}
 }
 
@@ -1239,7 +1297,7 @@ proc ::LiveBugTracer::leave_trace_call {command errorcode result operation} {
 	}
 	set output "[set ::LiveBugTracer::callback_prefix][set ::LiveBugTracer::trace_proc_return_color]\[leave [set procname]\]\003 \037code d'erreur\037 : [set errorcode]  [set ::LiveBugTracer::trace_separator_color]|\003  \037retour\037 : [::LiveBugTracer::truncate_line $::LiveBugTracer::max_data_length $result]"
 	foreach line [::LiveBugTracer::split_line $::LiveBugTracer::max_line_length $output] {
-		putloglev o * [::LiveBugTracer::filter_styles - $line]
+		::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - $line]
 	}
 }
 
@@ -1253,7 +1311,7 @@ proc ::LiveBugTracer::delete_trace_call {oldname newname operation} {
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type exe target $oldname tracetype enterstep call ::LiveBugTracer::enterstep_trace_call]]] $index]
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type cmd target $oldname tracetype delete call ::LiveBugTracer::delete_trace_call]]] $index]
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type cmd target $oldname tracetype rename call ::LiveBugTracer::rename_trace_call]]] $index]
-	putloglev o * [::LiveBugTracer::filter_styles - "[set ::LiveBugTracer::default_prefix]Traçage désactivé sur la procédure[set ::LiveBugTracer::highlight_color] [set oldname]\003 suite à sa modification ou à sa suppression."]
+	::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - "[set ::LiveBugTracer::default_prefix]Traçage désactivé sur la procédure[set ::LiveBugTracer::highlight_color] [set oldname]\003 suite à sa modification ou à sa suppression."]
 }
 
  ###############################################################################
@@ -1265,7 +1323,7 @@ proc ::LiveBugTracer::rename_trace_call {oldname newname operation} {
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type exe target $oldname tracetype enterstep call ::LiveBugTracer::enterstep_trace_call]]] $index [list type exe target $newname tracetype enterstep call ::LiveBugTracer::enterstep_trace_call]]
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type cmd target $oldname tracetype delete call ::LiveBugTracer::delete_trace_call]]] $index [list type cmd target $newname tracetype delete call ::LiveBugTracer::delete_trace_call]]
 	set ::LiveBugTracer::running_traces [lreplace $::LiveBugTracer::running_traces [set index [lsearch -exact $::LiveBugTracer::running_traces [list type cmd target $oldname tracetype rename call ::LiveBugTracer::rename_trace_call]]] $index [list type cmd target $newname tracetype rename call ::LiveBugTracer::rename_trace_call]]
-	putloglev o * [::LiveBugTracer::filter_styles - "[set ::LiveBugTracer::default_prefix]La procédure[set ::LiveBugTracer::highlight_color] [set oldname]\003 a été renommée en[set ::LiveBugTracer::highlight_color] [set newname]\003 et reste tracée. Notez que[set ::LiveBugTracer::highlight_color] [set oldname]\003 n'est maintenant plus tracée."]
+	::LiveBugTracer::sent_message [::LiveBugTracer::filter_styles - "[set ::LiveBugTracer::default_prefix]La procédure[set ::LiveBugTracer::highlight_color] [set oldname]\003 a été renommée en[set ::LiveBugTracer::highlight_color] [set newname]\003 et reste tracée. Notez que[set ::LiveBugTracer::highlight_color] [set oldname]\003 n'est maintenant plus tracée."]
 }
 
  ###############################################################################
@@ -1409,10 +1467,10 @@ proc ::LiveBugTracer::output_message {chan idx log message} {
 		if { $chan ne "-" } {
 			putquick "PRIVMSG $chan :[set output]"
 			if { $log } {
-				putloglev o * $output
+				::LiveBugTracer::sent_message $output
 			}
 		} elseif { $log } {
-			putloglev o * $output
+			::LiveBugTracer::sent_message $output
 		} else {
 			putdcc $idx $output
 		}
@@ -1516,6 +1574,10 @@ proc ::LiveBugTracer::list_namespaces_callback {counter current_namespace} {
 		return $output
 	}
 }
+proc ::LiveBugTracer::sent_message { message } {
+	putloglev o * ${message}
+	if { ${::LiveBugTracer::destination_status} != "" } { puthelp "PRIVMSG ${::LiveBugTracer::channel_destination} :${message}"; }
+}
 
  ###############################################################################
 ### Post-initialisation
@@ -1537,11 +1599,13 @@ bind DCC $::LiveBugTracer::debugging_auth $::LiveBugTracer::clean_traces_cmd ::L
 bind PUB $::LiveBugTracer::debugging_auth [set ::LiveBugTracer::pub_command_prefix][set ::LiveBugTracer::autobacktrace_cmd] ::LiveBugTracer::pub_activate_deactivate
 bind DCC $::LiveBugTracer::debugging_auth $::LiveBugTracer::autobacktrace_cmd ::LiveBugTracer::dcc_activate_deactivate
 bind PUB $::LiveBugTracer::debugging_auth [set ::LiveBugTracer::pub_command_prefix][set ::LiveBugTracer::anti_infiniteloop_cmd] ::LiveBugTracer::pub_loopfuse
-bind DCC $::LiveBugTracer::debugging_auth $::LiveBugTracer::anti_infiniteloop_cmd ::LiveBugTracer::dcc_loopfuse
+bind DCC $::LiveBugTracer::debugging_auth $::LiveBugTracer::destination_cmd ::LiveBugTracer::dcc_destination
+bind PUB $::LiveBugTracer::debugging_auth [set ::LiveBugTracer::pub_command_prefix][set ::LiveBugTracer::destination_cmd] ::LiveBugTracer::pub_destination
+bind DCC $::LiveBugTracer::debugging_auth $::LiveBugTracer::destination_cmd ::LiveBugTracer::dcc_destination
 bind EVNT - prerehash ::LiveBugTracer::uninstall
 if { $::LiveBugTracer::default_anti_infiniteloop_status } {
 	::LiveBugTracer::loopfuse - - 1
-	putloglev o * "\[$::LiveBugTracer::scriptname\] La protection anti-boucle infinie est activée"
+	::LiveBugTracer::sent_message "\[$::LiveBugTracer::scriptname\] La protection anti-boucle infinie est activée"
 }	
 
 
