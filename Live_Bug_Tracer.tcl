@@ -115,7 +115,7 @@
 if {[::tcl::info::commands ::LiveBugTracer::uninstall] eq "::LiveBugTracer::uninstall"} { ::LiveBugTracer::uninstall }
 # Note pour les programmeurs :
 # Dans la version 1.6.19 d'Eggdrop, le numéro de version affiché par .vbottree et [numversion] est incorrect; il affiche 1061800 ou 1061801, ce qui correspond à la version 1.6.18. On utilise donc une autre technique pour vérifier le numéro de version.
-if { [join [split [::tcl::string::range [lindex $version 0] 0 5] "."] ""] < 1620 } { putloglev o * "\00304\[Live Bug Tracer - Erreur\]\003 La version de votre Eggdrop est \00304[set ::version]\003; Live Bug Tracer ne fonctionnera correctement que sur les Eggdrops version 1.6.20 ou supérieure." ; return }
+if { [lindex $::version 1] <= 1062100 } { putloglev o * "\00304\[Live Bug Tracer - Erreur\]\003 La version de votre Eggdrop est \00304[set ::version]\003; Live Bug Tracer ne fonctionnera correctement que sur les Eggdrops version 1.6.20 ou supérieure." ; return }
 if { [::tcl::info::tclversion] < 8.5 } { putloglev o * "\00304\[Live Bug Tracer - Erreur\]\003 Live Bug Tracer nécessite que Tcl 8.5 (ou plus) soit installé pour fonctionner. Votre version actuelle de Tcl est \00304[set ::tcl_version]\003." ; return }
 package require Tcl 8.5
 namespace eval LiveBugTracer {
