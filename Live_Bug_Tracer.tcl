@@ -97,7 +97,7 @@
 #		- Passage sous licence Creative Commons
 # 2.1    par ZarTek-Creole ( https://github.com/ZarTek-Creole )
 #		- Ajout de la posibilité de redirigers les message vers un salon
-#			voir le praramettre : variable default_channel_destionation
+#			voir le praramettre : variable default_channel_destination
 #
 
 #
@@ -132,7 +132,7 @@ namespace eval LiveBugTracer {
 
 	## L'affichage des erreurs catchées doit-il être activé par défaut ?
 	# (1 = oui / 0 = non)
-	variable default_autobacktrace_catch_status 0
+	variable default_autobacktrace_catch_status 1
 
 	## La protection anti-boucle infinie doit-elle être activée par défaut ?
 	# Les commandes "à risque" sont alors remplacées par des procédures ayant
@@ -142,7 +142,7 @@ namespace eval LiveBugTracer {
 	# commandes d'origine, et bien que ça ne soit pas très sensible, vous ne
 	# devriez pas laisser cette protection activée en permanence à moins d'avoir
 	# une raison valable de le faire.
-	variable default_anti_infiniteloop_status 0
+	variable default_anti_infiniteloop_status 1
 
 	## Après combien de secondes la protection anti-boucle infinie doit-elle
 	# considérer une boucle comme étant infinie ? Passé ce délai, la boucle
@@ -162,7 +162,7 @@ namespace eval LiveBugTracer {
 	## Salon de destination des messages (en plus qu'en partyline)
 	# mettre "#votre_salon" et pour desactiver laisser vide en metant ""
     # A savoir: Vous pouvez également mettre votre pseudonyme pour avoir en privée
-	variable default_channel_destionation ""
+	variable default_channel_destination "#Extra-cool"
 
 	## Si certains des scripts que vous utilisez utilisent des "trace", ceux-ci
 	# risquent de polluer le traçage des procédures (commande .trace).
@@ -176,7 +176,7 @@ namespace eval LiveBugTracer {
 	#
 
 	## Préfixe des commandes publiques
-	variable pub_command_prefix "."
+	variable pub_command_prefix "!"
 	# Remarque : le préfixe des commandes de partyline est toujours "."
 
 	## Autorisations requises pour utiliser les commandes de ce script
@@ -324,12 +324,12 @@ namespace eval LiveBugTracer {
 	variable autobacktrace_status $default_autobacktrace_status
 	variable autobacktrace_catched_errors $default_autobacktrace_catch_status
 	variable anti_infiniteloop_status $default_anti_infiniteloop_status
-	if { ${default_channel_destionation} == "" } { 
+	if { ${default_channel_destination} == "" } { 
         variable destination_status 0
-        variable channel_destionation ""
+        variable channel_destination ""
     } else { 
         variable destination_status 1 
-        variable channel_destionation ${default_channel_destionation}
+        variable channel_destination ${default_channel_destination}
     }
 	variable running_traces {}
 	variable latent_traces {}
@@ -1576,7 +1576,7 @@ proc ::LiveBugTracer::list_namespaces_callback {counter current_namespace} {
 }
 proc ::LiveBugTracer::sent_message { message } {
 	putloglev o * ${message}
-	if { ${::LiveBugTracer::destination_status} != "" } { puthelp "PRIVMSG ${::LiveBugTracer::channel_destination} :${message}"; }
+	if { ${::LiveBugTracer::destination_status} != "" && ${::server-online} != 0 } { puthelp "PRIVMSG ${::LiveBugTracer::channel_destination} :${message}"; }
 }
 
  ###############################################################################
