@@ -95,7 +95,7 @@
 #			possédait pour toute fonctionnalité d'afficher le backtrace des erreurs
 #			en temps réel.
 #		- Passage sous licence Creative Commons
-# 2.1    par ZarTek-Creole ( https://github.com/ZarTek-Creole )
+# 2.1    par ZarTek-Creole ( github.com/ZarTek-Creole )
 #		- Ajout de la posibilité de redirigers les message vers un salon
 #			voir le praramettre : variable default_channel_destination
 #
